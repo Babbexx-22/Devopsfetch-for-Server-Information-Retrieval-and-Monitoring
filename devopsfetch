@@ -251,6 +251,21 @@ show_help() {
     echo "  -h, --help               Show this help message and exit"
 }
 
+# Function to continuously monitor system activities and log them
+continuous_monitoring() {
+    log "Starting continuous monitoring"
+    while true; do
+        # Collect system activities and log them
+        get_active_ports
+        list_docker_images
+        list_docker_containers
+        list_nginx_domains
+        list_users
+        # Sleep for a specified interval (e.g., 60 seconds) before the next iteration
+        sleep 60
+    done
+}
+
 # Main script logic with argument handling
 check_dependencies
 while [[ "$#" -gt 0 ]]; do
@@ -297,6 +312,10 @@ while [[ "$#" -gt 0 ]]; do
                 echo "Error: --time requires at least one argument"
                 exit 1
             fi
+            ;;
+        -l|--log)
+            continuous_monitoring
+            exit 0
             ;;
         -h|--help)
             show_help
