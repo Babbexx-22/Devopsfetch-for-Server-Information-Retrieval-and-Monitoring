@@ -12,7 +12,7 @@ install_dependencies() {
 # Function to move the script to /usr/local/bin
 move_script() {
     echo "Moving devopsfetch.sh to /usr/local/bin..."
-    sudo mv devopsfetch /usr/local/bin/devopsfetch || { echo "Error: Failed to move the script to /usr/local/bin."; exit 1; }
+    sudo cp devopsfetch /usr/local/bin/devopsfetch || { echo "Error: Failed to move the script to /usr/local/bin."; exit 1; }
 
     # Ensure the script has executable permissions
     sudo chmod +x /usr/local/bin/devopsfetch || { echo "Error: Failed to set executable permissions."; exit 1; }
@@ -30,7 +30,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/devopsfetch -l
+ExecStart=/usr/local/bin/devopsfetch
 Restart=always
 User=root
 
