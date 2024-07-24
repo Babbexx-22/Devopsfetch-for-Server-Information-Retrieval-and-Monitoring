@@ -46,17 +46,21 @@ EOF
     sudo systemctl start devopsfetch.service || { echo "Error: Failed to start devopsfetch service."; exit 1; }
 }
 
-    # Set up log rotation
-    cat << EOF > /etc/logrotate.d/devopsfetch
-    /var/log/devopsfetch.log {
-        hourly
-        rotate 288
-        compress
-        missingok
-        notifempty
-        create 666 root root
-    }
-    EOF
+# Function to set up log rotation
+setup_logrotate() {
+    echo "Setting up log rotation..."
+
+    cat << EOF | sudo tee /etc/logrotate.d/devopsfetch
+/var/log/devopsfetch.log {
+    hourly
+    rotate 288
+    compress
+    missingok
+    notifempty
+    create 666 root root
+}
+EOF
+}
 
 # Function to adjust permissions
 adjust_permissions() {
@@ -74,6 +78,7 @@ adjust_permissions() {
 install_dependencies
 move_script
 setup_service
+setup_logrotate
 adjust_permissions
 
 echo "Setup complete. Please log out and log back in to apply group changes."
