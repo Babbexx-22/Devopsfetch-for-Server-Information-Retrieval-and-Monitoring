@@ -1,0 +1,312 @@
+#!/bin/bash
+
+log_file="/var/log/devopsfetch.log"
+
+# Logging function with error handling
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> $log_file
+}
+
+# Dependency check function
+check_dependencies() {
+    command -v ss > /dev/null 2>&1 || { echo "Error: ss command not found. Please install it."; exit 1; }
+    command -v docker > /dev/null 2>&1 || { echo "Error: Docker not found. Please install it."; exit 1; }
+    command -v nginx > /dev/null 2>&1 || { echo "Error: Nginx not found. Please install it."; exit 1; }
+    command -v awk > /dev/null 2>&1 || { echo "Error: awk command not found. Please install it."; exit 1; }
+    command -v column > /dev/null 2>&1 || { echo "Error: column command not found. Please install it."; exit 1; }
+    command -v jq > /dev/null 2>&1 || { echo "Error: jq command not found. Please install it."; exit 1; }
+    command -v netstat > /dev/null 2>&1 || { echo "Error: netstat command not found. Please install it."; exit 1; }
+
+     # Check if netstat is installed
+    if ! command -v netstat > /dev/null 2>&1; then
+        echo "netstat not found. Installing..."
+        if [ -x "$(command -v apt-get)" ]; then
+            sudo apt-get update && sudo apt-get install -y net-tools
+        elif [ -x "$(command -v yum)" ]; then
+            sudo yum install -y net-tools
+        elif [ -x "$(command -v dnf)" ]; then
+            sudo dnf install -y net-tools
+        else
+            echo "Error: Package manager not found. Cannot install netstat."
+            exit 1
+        fi
+    fi
+}
+
+# Function to format output as a table
+format_table() {
+    awk 'BEGIN {FS="\t"; OFS="\t"} {print $1, $2, $3, $4, $5}' | column -t
+}
+
+# Functions to get system information with logging and error handling
+get_active_ports() {
+    log "Retrieving active ports and services"
+    ss -tuln | awk 'NR==1{print "Proto", "Recv-Q", "Send-Q", "Local Address:Port", "Peer Address:Port"} NR>1{print $1, $2, $3, $4, $5}' | format_table || { echo "Error: Failed to retrieve active ports."; exit 1; }
+}
+
+get_port_info() {
+    local port=$1
+    log "Retrieving information for port $port"
+
+    # Define column widths for port information
+    local col1_width=8
+    local col2_width=6
+    local col3_width=6
+    local col4_width=25
+    local col5_width=25
+    local col6_width=30
+
+    # Function to print a separator line
+    print_separator() {
+        printf '+-%s-+-%s-+-%s-+-%s-+-%s-+-%s-+\n' "$(printf '%*s' "$col1_width" | tr ' ' '-')" \
+            "$(printf '%*s' "$col2_width" | tr ' ' '-')" \
+            "$(printf '%*s' "$col3_width" | tr ' ' '-')" \
+            "$(printf '%*s' "$col4_width" | tr ' ' '-')" \
+            "$(printf '%*s' "$col5_width" | tr ' ' '-')" \
+            "$(printf '%*s' "$col6_width" | tr ' ' '-')"
+    }
+
+    # Print table header with separators
+    print_separator
+    printf '| %-8s | %-6s | %-6s | %-25s | %-25s | %-30s |\n' "Proto" "Recv-Q" "Send-Q" "Local Address:Port" "Peer Address:Port" "Service Name"
+    print_separator
+
+    netstat -tulnp | grep ":$port" | awk -v col1_width="$col1_width" -v col2_width="$col2_width" -v col3_width="$col3_width" -v col4_width="$col4_width" -v col5_width="$col5_width" -v col6_width="$col6_width" '
+    NR > 2 {
+        split($7, arr, "/")
+        printf "| %-8s | %-6s | %-6s | %-25s | %-25s | %-30s |\n", $1, $2, $3, $4, $5, arr[2]
+    }
+    '
+
+    # Print the footer line
+    print_separator
+}
+
+list_docker_images() {
+    log "Listing Docker images"
+    echo -e "\nDocker Images:\n"
+    docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedAt}}\t{{.Size}}" || { echo "Error: Failed to list Docker images."; exit 1; }
+    echo -e "\n"  # Add a line gap after listing Docker images
+}
+
+list_docker_containers() {
+    log "Listing Docker containers"
+    echo -e "Docker Containers:\n"
+    docker ps -a --format "table {{.ID}}\t{{.Image}}\t{{.Command}}\t{{.CreatedAt}}\t{{.Status}}" || { echo "Error: Failed to list Docker containers."; exit 1; }
+}
+
+get_docker_container_info() {
+    local container_name=$1
+    log "Retrieving information for Docker container $container_name"
+    docker inspect $container_name | jq '.' || { echo "Error: Failed to retrieve information for Docker container $container_name."; exit 1; }
+}
+
+list_nginx_domains() {
+    log "Listing Nginx domains and their ports"
+
+    # Define column widths
+    local col1_width=50
+    local col2_width=15
+    local col3_width=40
+
+    # Function to print a separator line
+    print_separator() {
+        printf '+-%s-+-%s-+-%s-+\n' "$(printf '%*s' "$col1_width" | tr ' ' '-')" \
+            "$(printf '%*s' "$col2_width" | tr ' ' '-')" \
+            "$(printf '%*s' "$col3_width" | tr ' ' '-')"
+    }
+
+    # Print table header with separators
+    print_separator
+    printf '| %-50s | %-15s | %-40s |\n' "Server Domain" "Port" "Configuration File"
+    print_separator
+
+    for config_file in /etc/nginx/sites-enabled/*; do
+        awk '/server_name/ {server_name=$2} /listen/ {port=$2} END {if (server_name && port) printf "| %-50s | %-15s | %-40s |\n", server_name, port, FILENAME}' $config_file
+    done
+
+    # Print the footer line
+    print_separator
+}
+
+get_nginx_domain_info() {
+    local domain=$1
+    log "Retrieving Nginx configuration for domain $domain"
+
+    # Define column widths
+    local col1_width=50
+    local col2_width=30
+    local col3_width=40
+
+    # Function to print a separator line
+    print_separator() {
+        printf '+-%s-+-%s-+-%s-+\n' "$(printf '%*s' "$col1_width" | tr ' ' '-')" \
+            "$(printf '%*s' "$col2_width" | tr ' ' '-')" \
+            "$(printf '%*s' "$col3_width" | tr ' ' '-')"
+    }
+
+    # Print table header with separators
+    print_separator
+    printf '| %-50s | %-30s | %-40s |\n' "Server Domain" "Proxy" "Configuration File"
+    print_separator
+
+    grep -rl "server_name.*$domain" /etc/nginx/sites-enabled/ | while read -r config_file; do
+        server_block=$(awk '/server {/,/}/' "$config_file")
+        
+        # Extract server name
+        server_name=$(echo "$server_block" | grep -oP '(?<=server_name\s)[^;]+')
+        # Use 'N/A' if server_name is empty
+        server_name=${server_name:-N/A}
+        
+        # Extract proxy settings
+        proxy_settings=$(echo "$server_block" | grep -oP '(?<=proxy_pass\s)[^;]+')
+        # Use 'N/A' if proxy_settings is empty
+        proxy_settings=${proxy_settings:-N/A}
+        
+        # Output results with proper column alignment
+        printf '| %-50s | %-30s | %-40s |\n' "$server_name" "$proxy_settings" "$config_file"
+    done
+    
+    # Print the footer line
+    print_separator
+}
+
+list_users() {
+    log "Listing users and their last login times"
+    lastlog | awk 'NR==1{print "Username", "Port", "Last Login"} NR>1{print $1, $2, $3, $4}' | format_table || { echo "Error: Failed to list users."; exit 1; }
+}
+
+get_user_info() {
+    local username=$1
+    log "Retrieving last login information for user $username"
+    last $username || { echo "Error: Failed to retrieve last login information for user $username."; exit 1; }
+}
+
+list_active_ports() {
+    log "Listing active ports"
+    
+    # Define column widths
+    local col1_width=8
+    local col2_width=6
+    local col3_width=6
+    local col4_width=30
+    local col5_width=30
+
+    # Function to print a separator line
+    print_separator() {
+        printf '+-%s-+-%s-+-%s-+-%s-+-%s-+\n' "$(printf '%*s' "$col1_width" | tr ' ' '-')" \
+            "$(printf '%*s' "$col2_width" | tr ' ' '-')" \
+            "$(printf '%*s' "$col3_width" | tr ' ' '-')" \
+            "$(printf '%*s' "$col4_width" | tr ' ' '-')" \
+            "$(printf '%*s' "$col5_width" | tr ' ' '-')"
+    }
+
+    # Print table header with separators
+    print_separator
+    printf '| %-8s | %-6s | %-6s | %-30s | %-30s |\n' "Proto" "Recv-Q" "Send-Q" "Local Address:Port" "Peer Address:Port"
+    print_separator
+
+    ss -tuln | awk 'NR>1 {printf "| %-8s | %-6s | %-6s | %-30s | %-30s |\n", $1, $2, $3, $4, $5}' 
+
+    # Print the footer line
+    print_separator
+}
+
+display_activities_in_time_range() {
+    local start_time=$1
+    local end_time=$2
+
+    # Validate date format
+    if ! date -d "$start_time" '+%Y-%m-%d' > /dev/null 2>&1; then
+        echo "Error: Invalid start date format. Use YYYY-MM-DD."
+        exit 1
+    fi
+
+    if [ -z "$end_time" ]; then
+        # If end_time is not provided, set it to the same as start_time
+        end_time="$start_time"
+    elif ! date -d "$end_time" '+%Y-%m-%d' > /dev/null 2>&1; then
+        echo "Error: Invalid end date format. Use YYYY-MM-DD."
+        exit 1
+    fi
+
+    log "Displaying activities from $start_time to $end_time"
+
+    # Print log entries within the specified date range and sort them
+    awk -v start="$start_time" -v end="$end_time" \
+        '$0 >= start " " "00:00:00" && $0 <= end " " "23:59:59"' $log_file | sort || { echo "Error: Failed to display activities in time range."; exit 1; }
+}
+
+# Help function
+show_help() {
+    echo "DevOpsFetch - System Information Retrieval and Monitoring Tool"
+    echo "Usage: $0 [OPTION]..."
+    echo "Options:"
+    echo "  -p, --port [PORT]        Display all active ports or details of a specific port"
+    echo "  -d, --docker [CONTAINER] List Docker images/containers or details of a specific container"
+    echo "  -n, --nginx [DOMAIN]     List Nginx domains or details of a specific domain"
+    echo "  -u, --users [USERNAME]   List all users and their last login times or details of a specific user"
+    echo "  -t, --time START [END]   Display activities within a specified time range"
+    echo "  -l, --log                Enable continuous monitoring and logging"
+    echo "  -h, --help               Show this help message and exit"
+}
+
+# Main script logic with argument handling
+check_dependencies
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        -p|--port)
+            if [[ -z "$2" || "$2" == -* ]]; then
+                list_active_ports
+            else
+                get_port_info "$2"
+                shift
+            fi
+            ;;
+        -d|--docker)
+            if [[ -z "$2" || "$2" == -* ]]; then
+                list_docker_images
+                list_docker_containers
+            else
+                get_docker_container_info "$2"
+                shift
+            fi
+            ;;
+        -n|--nginx)
+            if [[ -z "$2" || "$2" == -* ]]; then
+                list_nginx_domains
+            else
+                get_nginx_domain_info "$2"
+                shift
+            fi
+            ;;
+        -u|--users)
+            if [[ -z "$2" || "$2" == -* ]]; then
+                list_users
+            else
+                get_user_info "$2"
+                shift
+            fi
+            ;;
+        -t|--time)
+            if [[ -n "$2" ]]; then
+                display_activities_in_time_range "$2" "$3"
+                shift 2
+                [[ -n "$3" ]] && shift
+            else
+                echo "Error: --time requires at least one argument"
+                exit 1
+            fi
+            ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            show_help
+            exit 1
+            ;;
+    esac
+    shift
+done
