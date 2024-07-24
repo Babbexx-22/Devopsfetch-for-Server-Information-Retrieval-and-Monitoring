@@ -79,8 +79,13 @@ adjust_permissions() {
 }
 ```
 
-## Log Rotation Configuration
-Log rotation ensures that log files do not grow indefinitely, preserving system performance and disk space. The following configuration is added to handle log rotation:
+## Logging Mechanism and How to Retrieve Logs
+
+### Logging Mechanism:
+The devopsfetch tool includes a robust logging mechanism to continuously monitor and record system activities. This is achieved through a systemd service, which ensures that the monitoring runs continuously in the background. Logs are recorded in a dedicated log file, /var/log/devopsfetch.log, with detailed information about the execution of various devopsfetch commands.
+
+To manage the log file and prevent it from growing indefinitely, we have implemented a log rotation system. The log rotation is configured to rotate the log file hourly and keep up to 288 compressed logs. This setup ensures that the log data is kept manageable and does not consume excessive disk space.
+
 Log Rotation File: "/etc/logrotate.d/devopsfetch"
 
 ```
@@ -103,6 +108,19 @@ Log Rotation File: "/etc/logrotate.d/devopsfetch"
 - notifempty: Does not rotate the log file if it is empty.
 - create 666 root root: Creates a new log file with the specified permissions and ownership after rotation.
 - postrotate: Runs a script after rotating the log file to restart the devopsfetch service, ensuring it writes to the new log file.
+
+### How to Retrieve Logs:
+
+- View Current Log:
+To view the latest logs, you can use the cat or tail command. For example:
+```
+cat /var/log/devopsfetch.log
+```
+or to continuously monitor the log output, you can use:
+
+```
+tail -f /var/log/devopsfetch.log
+```
 
 ## Usage
 
