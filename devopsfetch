@@ -216,7 +216,7 @@ display_activities_in_time_range() {
     local start_time=$1
     local end_time=$2
 
-    # Validate date format
+    # Validate date format correctly
     if ! date -d "$start_time" '+%Y-%m-%d' > /dev/null 2>&1; then
         echo "Error: Invalid start date format. Use YYYY-MM-DD."
         exit 1
